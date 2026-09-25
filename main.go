@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -13,8 +12,6 @@ import (
 	"fyne.io/fyne/v2/storage"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-
-	"pymoviefile"
 )
 
 const (
@@ -25,6 +22,8 @@ const (
 
 	// Preference keys.
 	prefLastFolder = "lastFolder" // folder of the last file picked in the Open dialog
+	prefDotSize    = "dotSize"    // dot diameter on the light curve plot
+	prefMainWindow = "mainWindow" // prefix of the main window's size and position keys
 )
 
 func main() {
@@ -38,10 +37,17 @@ func main() {
 
 	a := app.NewWithID(appID)
 	w := a.NewWindow(appTitle)
+	w.SetMaster() // closing the main window quits, closing the image windows too
 	body := container.NewStack()
+	var current *viewer // the viewer of the file shown, or nil
 
 	show := func(path string) {
-		body.Objects = []fyne.CanvasObject{buildContent(path)}
+		if current != nil {
+			current.closeImageWindows()
+		}
+		var content fyne.CanvasObject
+		content, current = newViewer(path, a, w)
+		body.Objects = []fyne.CanvasObject{content}
 		body.Refresh()
 		w.SetTitle(appTitle + " - " + filepath.Base(path))
 	}
@@ -86,47 +92,21 @@ func main() {
 	}
 
 	w.SetContent(container.NewBorder(container.NewHBox(openButton), nil, nil, nil, body))
-	w.Resize(fyne.NewSize(700, 500))
-	w.ShowAndRun()
-}
-
-// buildContent reads the file at path and returns the window content: the header
-// fields above a list of the aperture names, or an error message.
-func buildContent(path string) fyne.CanvasObject {
-	header, records, err := pymoviefile.ReadFile(path)
-	if err != nil {
-		return widget.NewLabel(fmt.Sprintf("Reading %s: %v", path, err))
-	}
-
-	names := apertureGroupNames(records)
-	info := widget.NewForm(
-		widget.NewFormItem("File", widget.NewLabel(path)),
-		widget.NewFormItem("Source", widget.NewLabel(header.Source)),
-		widget.NewFormItem("Obs date", widget.NewLabel(header.ObsDate)),
-		widget.NewFormItem("Roi size", widget.NewLabel(fmt.Sprint(header.RoiSize))),
-		widget.NewFormItem("Records", widget.NewLabel(fmt.Sprint(len(records)))),
-	)
-	title := widget.NewLabelWithStyle(fmt.Sprintf("Apertures in an aperture group (%d)", len(names)),
-		fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
-	list := widget.NewList(
-		func() int { return len(names) },
-		func() fyne.CanvasObject { return widget.NewLabel("") },
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(fmt.Sprintf("%d: %s", i+1, names[i]))
-		},
-	)
-	return container.NewBorder(container.NewVBox(info, widget.NewSeparator(), title), nil, nil, nil, list)
-}
-
-// apertureGroupNames returns the aperture names of the first aperture group:
-// the records written for the first frame (or field), in the order written.
-func apertureGroupNames(records []pymoviefile.Record) []string {
-	var names []string
-	for _, r := range records {
-		if r.Frame != records[0].Frame {
-			break
+	prefs := a.Preferences()
+	restoreWindowSize(prefs, w, prefMainWindow, fyne.NewSize(1100, 650))
+	w.SetCloseIntercept(func() {
+		saveWindowGeometry(prefs, w, prefMainWindow)
+		if current != nil {
+			current.closeImageWindows() // saves their geometry
 		}
-		names = append(names, r.Name)
-	}
-	return names
+		w.Close()
+	})
+	// Windows have no native window, so no position, until the app is running.
+	a.Lifecycle().SetOnStarted(func() {
+		restoreWindowPosition(prefs, w, prefMainWindow)
+		if current != nil {
+			current.restoreImageWindowPositions()
+		}
+	})
+	w.ShowAndRun()
 }
