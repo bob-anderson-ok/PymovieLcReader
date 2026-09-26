@@ -53,6 +53,19 @@ func TestBuildLightCurvesSortsByFrame(t *testing.T) {
 	}
 }
 
+func TestSaturationLevel(t *testing.T) {
+	recs := []pymoviefile.Record{{Saturation: 0}, {Saturation: 900}, {Saturation: 800}, {Saturation: 900}}
+	if got := saturationLevel(recs); got != 900 {
+		t.Errorf("saturation = %d, want the most common, 900", got)
+	}
+	if got := saturationLevel(recs[:1]); got != 0 {
+		t.Errorf("saturation = %d, want 0 when not set", got)
+	}
+	if got := saturationLevel(recs[1:3]); got != 800 {
+		t.Errorf("saturation = %d, want the smaller on a tie, 800", got)
+	}
+}
+
 // TestViewerOnSampleFile builds the viewer for LC-test.pymovie in a test window,
 // works its controls, and renders the plot.
 func TestViewerOnSampleFile(t *testing.T) {
@@ -67,7 +80,7 @@ func TestViewerOnSampleFile(t *testing.T) {
 	var checks []*widget.Check
 	var limits []*widget.Entry
 	collect(split.Leading, &checks, &limits)
-	if len(checks) != 5 || len(limits) != 4 { // 4 apertures + appsum; begin, end, upper, lower
+	if len(checks) != 5 || len(limits) != 5 { // 4 apertures + appsum; begin, end, upper, lower, red
 		t.Fatalf("found %d checks, %d entries", len(checks), len(limits))
 	}
 	upper := limits[2].Text

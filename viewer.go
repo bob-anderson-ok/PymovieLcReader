@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -49,6 +50,8 @@ type viewer struct {
 	useAppsum  bool
 	yMin, yMax float64
 	dotSize    float64
+	redLevel   float64 // image pixels at or above this are red; +Inf for none
+	saturation uint16  // the records' saturation value, the default red level; 0 if not set
 
 	frames []float64 // every frame, sorted: the points the cursor steps through
 	cursor int       // index into frames
@@ -72,11 +75,13 @@ func newViewer(path string, app fyne.App, win fyne.Window) (fyne.CanvasObject, *
 	}
 
 	v := &viewer{
-		app:     app,
-		win:     win,
-		prefs:   app.Preferences(),
-		curves:  buildLightCurves(records),
-		dotSize: app.Preferences().FloatWithFallback(prefDotSize, defaultDotSize),
+		app:        app,
+		win:        win,
+		prefs:      app.Preferences(),
+		curves:     buildLightCurves(records),
+		dotSize:    app.Preferences().FloatWithFallback(prefDotSize, defaultDotSize),
+		redLevel:   math.Inf(1),
+		saturation: saturationLevel(records),
 	}
 	v.selected = make([]bool, len(v.curves))
 	v.imageWins = make([]*imageWindow, len(v.curves))
@@ -120,6 +125,8 @@ func newViewer(path string, app fyne.App, win fyne.Window) (fyne.CanvasObject, *
 		v.limitControls(),
 		widget.NewSeparator(),
 		v.dotSizeControl(),
+		widget.NewSeparator(),
+		v.redLevelControl(),
 	)
 	v.resetLimits()
 	v.setCursor(0)
@@ -213,6 +220,7 @@ func (v *viewer) openImageWindow(i int) {
 		return
 	}
 	iw := newImageWindow(v.app, v.curves[i])
+	iw.red = v.redLevel
 	v.imageWins[i] = iw
 	restoreWindowSize(v.prefs, iw.win, imageWindowKey(i), fyne.NewSize(640, 420))
 	iw.win.SetCloseIntercept(func() { v.checks[i].SetChecked(false) })
@@ -404,6 +412,41 @@ func (v *viewer) dotSizeControl() fyne.CanvasObject {
 		v.redraw()
 	}
 	return container.NewVBox(label, slider)
+}
+
+// redLevelControl returns the entry for the pixel value at or above which the
+// aperture images show red. It starts at the records' saturation value; blank
+// shows no red pixels.
+func (v *viewer) redLevelControl() fyne.CanvasObject {
+	e := widget.NewEntry()
+	e.SetPlaceHolder("blank: none")
+	e.Validator = func(s string) error {
+		if strings.TrimSpace(s) == "" {
+			return nil
+		}
+		_, err := strconv.ParseFloat(s, 64)
+		return err
+	}
+	e.OnChanged = func(s string) {
+		level := math.Inf(1)
+		if strings.TrimSpace(s) != "" {
+			x, err := strconv.ParseFloat(s, 64)
+			if err != nil {
+				return
+			}
+			level = x
+		}
+		v.redLevel = level
+		for _, iw := range v.imageWins {
+			if iw != nil {
+				iw.setRedLevel(level)
+			}
+		}
+	}
+	if v.saturation > 0 {
+		e.SetText(fmt.Sprint(v.saturation))
+	}
+	return widget.NewForm(widget.NewFormItem("Red pixels at or above", e))
 }
 
 // formatLimit formats a display limit for its entry, to 2 decimal places at most.

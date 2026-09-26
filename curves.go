@@ -192,3 +192,21 @@ func (c *lightCurve) pixelRange() (lo, hi uint16) {
 	}
 	return lo, hi
 }
+
+// saturationLevel returns the saturation value in effect in the records: the
+// most common non-zero one, as it may change during a run (the smaller on a
+// tie), or 0 if every record has 0.
+func saturationLevel(records []pymoviefile.Record) uint16 {
+	count := map[uint16]int{}
+	var level uint16
+	for _, r := range records {
+		if r.Saturation == 0 {
+			continue
+		}
+		count[r.Saturation]++
+		if n, best := count[r.Saturation], count[level]; n > best || (n == best && r.Saturation < level) {
+			level = r.Saturation
+		}
+	}
+	return level
+}

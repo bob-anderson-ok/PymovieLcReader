@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	appVersion = "1.0"
+	appVersion = "1.1"
 	appTitle   = "PyMovie LC Reader " + appVersion
 	// appID identifies the app to Fyne, which keys the preferences store on it.
 	// Changing it later loses any saved preferences.

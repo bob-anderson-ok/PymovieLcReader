@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/canvas"
@@ -15,6 +16,9 @@ import (
 // so it can't be mistaken for image data.
 var maskClosedColor = color.NRGBA{R: 0xff, G: 0x8c, B: 0x00, A: 0xff} // orange
 
+// highPixelColor marks pixels at or above the level the user gives.
+var highPixelColor = color.NRGBA{R: 0xff, G: 0x00, B: 0x00, A: 0xff} // red
+
 // imageWindow shows one aperture's image at the cursor frame: the raw image on
 // the left, and on the right the image data inside the sampling mask. Two
 // sliders set the black and white levels used for both.
@@ -24,6 +28,7 @@ type imageWindow struct {
 	point int // index of the point shown, or -1 if the curve has none at the frame
 
 	black, white float64
+	red          float64 // pixels at or above this are red; +Inf for none
 	raw, masked  *canvas.Image
 	info         *widget.Label
 }
@@ -34,6 +39,7 @@ func newImageWindow(app fyne.App, curve *lightCurve) *imageWindow {
 		win:    app.NewWindow(curve.Name + " - aperture images"),
 		curve:  curve,
 		point:  -1,
+		red:    math.Inf(1),
 		info:   widget.NewLabel(""),
 		raw:    pixelImage(),
 		masked: pixelImage(),
@@ -100,6 +106,12 @@ func (iw *imageWindow) showFrame(frame float64, useAppsum bool) {
 	iw.render()
 }
 
+// setRedLevel colors pixels at or above level red; +Inf colors none.
+func (iw *imageWindow) setRedLevel(level float64) {
+	iw.red = level
+	iw.render()
+}
+
 func (iw *imageWindow) render() {
 	n := iw.curve.RoiSize
 	if iw.point < 0 || n == 0 {
@@ -107,8 +119,8 @@ func (iw *imageWindow) render() {
 		iw.masked.Image = image.NewNRGBA(image.Rect(0, 0, 1, 1))
 	} else {
 		img, mask := iw.curve.Images[iw.point], iw.curve.Masks[iw.point]
-		iw.raw.Image = scaledImage(img, nil, n, iw.black, iw.white)
-		iw.masked.Image = scaledImage(img, mask, n, iw.black, iw.white)
+		iw.raw.Image = scaledImage(img, nil, n, iw.black, iw.white, iw.red)
+		iw.masked.Image = scaledImage(img, mask, n, iw.black, iw.white, iw.red)
 	}
 	iw.raw.Refresh()
 	iw.masked.Refresh()
@@ -116,8 +128,9 @@ func (iw *imageWindow) render() {
 
 // scaledImage turns an n×n row-major aperture image into gray levels: values at
 // or below black are black, at or above white are white, and linear between.
-// If mask is not nil, pixels where it is 0 are filled with maskClosedColor.
-func scaledImage(pixels []uint16, mask []uint8, n int, black, white float64) *image.NRGBA {
+// Pixels at or above red are highPixelColor. If mask is not nil, pixels where
+// it is 0 are filled with maskClosedColor instead.
+func scaledImage(pixels []uint16, mask []uint8, n int, black, white, red float64) *image.NRGBA {
 	out := image.NewNRGBA(image.Rect(0, 0, n, n))
 	span := white - black
 	for row := range n {
@@ -125,6 +138,10 @@ func scaledImage(pixels []uint16, mask []uint8, n int, black, white float64) *im
 			i := row*n + col
 			if mask != nil && mask[i] == 0 {
 				out.SetNRGBA(col, row, maskClosedColor)
+				continue
+			}
+			if float64(pixels[i]) >= red {
+				out.SetNRGBA(col, row, highPixelColor)
 				continue
 			}
 			var g uint8
