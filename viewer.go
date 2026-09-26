@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,6 +60,10 @@ type viewer struct {
 	checks    []*widget.Check // checks[i] selects curves[i]
 	imageWins []*imageWindow  // imageWins[i] shows curves[i]'s images; nil when closed
 
+	path     string
+	header   pymoviefile.Header
+	frameWin fyne.Window // shows the initial frame; nil when closed
+
 	yMinEntry, yMaxEntry *widget.Entry
 	plot                 *plotWidget
 	readout              *widget.Label
@@ -75,6 +80,8 @@ func newViewer(path string, app fyne.App, win fyne.Window) (fyne.CanvasObject, *
 	}
 
 	v := &viewer{
+		path:       path,
+		header:     header,
 		app:        app,
 		win:        win,
 		prefs:      app.Preferences(),
@@ -111,10 +118,16 @@ func newViewer(path string, app fyne.App, win fyne.Window) (fyne.CanvasObject, *
 		widget.NewFormItem("Source", truncatedLabel(header.Source)),
 		widget.NewFormItem("Obs date", widget.NewLabel(header.ObsDate)),
 		widget.NewFormItem("Records", widget.NewLabel(fmt.Sprint(len(records)))),
+		widget.NewFormItem("Frame size", widget.NewLabel(frameSizeText(header))),
 	)
+	frameButton := widget.NewButton("Show initial frame", v.openFrameWindow)
+	if !hasInitialFrame(header) {
+		frameButton.Disable() // written before PyMovie recorded the initial frame
+	}
 
 	controls := container.NewVBox(
 		info,
+		frameButton,
 		widget.NewSeparator(),
 		boldLabel("Apertures"),
 		v.apertureRows(),
@@ -134,6 +147,9 @@ func newViewer(path string, app fyne.App, win fyne.Window) (fyne.CanvasObject, *
 		if on {
 			v.openImageWindow(i)
 		}
+	}
+	if hasInitialFrame(header) {
+		v.openFrameWindow()
 	}
 
 	plotPane := container.NewBorder(nil, v.readout, nil, nil, v.plot)
@@ -240,22 +256,58 @@ func (v *viewer) closeImageWindow(i int) {
 	}
 }
 
-// closeImageWindows closes every image window, as when another file is opened
-// or the app closes.
-func (v *viewer) closeImageWindows() {
-	for i := range v.imageWins {
-		v.closeImageWindow(i)
+// prefFrameWindow is the preferences key for the initial frame window's geometry.
+const prefFrameWindow = "frameWindow"
+
+// openFrameWindow shows the initial frame window, or brings it to the front if
+// it is already open.
+func (v *viewer) openFrameWindow() {
+	if v.frameWin != nil {
+		v.frameWin.RequestFocus()
+		return
+	}
+	v.frameWin = newFrameWindow(v.app, v.header, "Initial frame - "+filepath.Base(v.path))
+	// Big enough for the frame at full size plus the padding, the size line and
+	// the aperture table (a heading and a row per aperture), within reason.
+	def := fyne.NewSize(
+		float32(min(max(v.header.FrameWidth+60, 640), maxFrameWindowWidth)),
+		float32(min(v.header.FrameHeight+110+40*(min(len(v.header.Apertures), maxVisibleApertures)+1), maxFrameWindowHeight)),
+	)
+	restoreWindowSize(v.prefs, v.frameWin, prefFrameWindow, def)
+	v.frameWin.SetCloseIntercept(v.closeFrameWindow)
+	v.frameWin.Show()
+	restoreWindowPosition(v.prefs, v.frameWin, prefFrameWindow)
+}
+
+// closeFrameWindow saves the initial frame window's geometry and closes it.
+func (v *viewer) closeFrameWindow() {
+	if v.frameWin != nil {
+		saveWindowGeometry(v.prefs, v.frameWin, prefFrameWindow)
+		v.frameWin.Close()
+		v.frameWin = nil
 	}
 }
 
-// restoreImageWindowPositions moves the open image windows to their saved
-// positions. Windows opened before the app started running have no native
-// window until then, so this is called again once it has.
-func (v *viewer) restoreImageWindowPositions() {
+// closeWindows closes every image window and the initial frame window, as when
+// another file is opened or the app closes.
+func (v *viewer) closeWindows() {
+	for i := range v.imageWins {
+		v.closeImageWindow(i)
+	}
+	v.closeFrameWindow()
+}
+
+// restoreWindowPositions moves the open image windows and the initial frame
+// window to their saved positions. Windows opened before the app started
+// running have no native window until then, so this is called again once it has.
+func (v *viewer) restoreWindowPositions() {
 	for i, iw := range v.imageWins {
 		if iw != nil {
 			restoreWindowPosition(v.prefs, iw.win, imageWindowKey(i))
 		}
+	}
+	if v.frameWin != nil {
+		restoreWindowPosition(v.prefs, v.frameWin, prefFrameWindow)
 	}
 }
 
@@ -304,7 +356,7 @@ func (v *viewer) apertureRows() fyne.CanvasObject {
 		rows.Add(container.NewBorder(nil, nil, nil,
 			container.NewHBox(container.NewCenter(swatch), colorButton), check))
 	}
-	return rows
+	return scrollIfMany(rows, len(v.curves))
 }
 
 // fieldCheck returns the check box that switches the plot from intensity to appsum.
@@ -464,4 +516,20 @@ func truncatedLabel(text string) *widget.Label {
 	l := widget.NewLabel(text)
 	l.Truncation = fyne.TextTruncateEllipsis
 	return l
+}
+
+// maxVisibleApertures is how many aperture rows are shown at once; more scroll.
+const maxVisibleApertures = 6
+
+// scrollIfMany returns rows, a container with a row (or, for a grid, a cell)
+// per aperture in its first objects, as they are when there are at most
+// maxVisibleApertures, and otherwise in a scroll box tall enough for that many.
+func scrollIfMany(rows *fyne.Container, count int) fyne.CanvasObject {
+	if count <= maxVisibleApertures || len(rows.Objects) == 0 {
+		return rows
+	}
+	rowHeight := rows.Objects[0].MinSize().Height
+	scroll := container.NewVScroll(rows)
+	scroll.SetMinSize(fyne.NewSize(0, maxVisibleApertures*rowHeight+(maxVisibleApertures-1)*theme.Padding()))
+	return scroll
 }

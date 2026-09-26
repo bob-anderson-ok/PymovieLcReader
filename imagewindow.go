@@ -7,7 +7,6 @@ import (
 	"math"
 
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
@@ -21,7 +20,8 @@ var highPixelColor = color.NRGBA{R: 0xff, G: 0x00, B: 0x00, A: 0xff} // red
 
 // imageWindow shows one aperture's image at the cursor frame: the raw image on
 // the left, and on the right the image data inside the sampling mask. Two
-// sliders set the black and white levels used for both.
+// sliders set the black and white levels used for both. Pointing at a pixel in
+// either image shows its value.
 type imageWindow struct {
 	win   fyne.Window
 	curve *lightCurve
@@ -29,21 +29,30 @@ type imageWindow struct {
 
 	black, white float64
 	red          float64 // pixels at or above this are red; +Inf for none
-	raw, masked  *canvas.Image
+	raw, masked  *pixelView
 	info         *widget.Label
+
+	pixelInfo          *widget.Label // the value of the pixel under the pointer
+	hovering           bool
+	hoverRow, hoverCol int
 }
+
+const pixelInfoPrompt = "Point at a pixel to see its value"
 
 // newImageWindow creates the window for curve's images. It is not shown yet.
 func newImageWindow(app fyne.App, curve *lightCurve) *imageWindow {
 	iw := &imageWindow{
-		win:    app.NewWindow(curve.Name + " - aperture images"),
-		curve:  curve,
-		point:  -1,
-		red:    math.Inf(1),
-		info:   widget.NewLabel(""),
-		raw:    pixelImage(),
-		masked: pixelImage(),
+		win:       app.NewWindow(curve.Name + " - aperture images"),
+		curve:     curve,
+		point:     -1,
+		red:       math.Inf(1),
+		info:      widget.NewLabel(""),
+		raw:       newPixelView(),
+		masked:    newPixelView(),
+		pixelInfo: widget.NewLabel(pixelInfoPrompt),
 	}
+	iw.raw.onHover = iw.hover
+	iw.masked.onHover = iw.hover
 	lo, hi := curve.pixelRange()
 	iw.black, iw.white = float64(lo), float64(hi)
 
@@ -56,18 +65,32 @@ func newImageWindow(app fyne.App, curve *lightCurve) *imageWindow {
 		widget.NewFormItem("Black level", iw.levelSlider(&iw.black, sliderMax)),
 		widget.NewFormItem("White level", iw.levelSlider(&iw.white, sliderMax)),
 	)
-	iw.win.SetContent(container.NewBorder(iw.info, levels, nil, nil, images))
+	bottom := container.NewVBox(iw.pixelInfo, levels)
+	iw.win.SetContent(container.NewBorder(iw.info, bottom, nil, nil, images))
 	return iw
 }
 
-// pixelImage returns an image that scales up without smoothing, so each pixel
-// of the aperture shows as a square.
-func pixelImage() *canvas.Image {
-	img := canvas.NewImageFromImage(image.NewNRGBA(image.Rect(0, 0, 1, 1)))
-	img.FillMode = canvas.ImageFillContain
-	img.ScaleMode = canvas.ImageScalePixels
-	img.SetMinSize(fyne.NewSize(160, 160))
-	return img
+// hover records the pixel under the pointer (ok false: none) and shows its value.
+func (iw *imageWindow) hover(row, col int, ok bool) {
+	iw.hovering, iw.hoverRow, iw.hoverCol = ok, row, col
+	iw.showPixelInfo()
+}
+
+// showPixelInfo shows the position, value and mask state of the pixel under the
+// pointer, in the frame shown.
+func (iw *imageWindow) showPixelInfo() {
+	if !iw.hovering || iw.point < 0 {
+		iw.pixelInfo.SetText(pixelInfoPrompt)
+		return
+	}
+	i := iw.hoverRow*iw.curve.RoiSize + iw.hoverCol
+	text := fmt.Sprintf("Pixel x %d, y %d:  %d", iw.hoverCol, iw.hoverRow, iw.curve.Images[iw.point][i])
+	if iw.curve.Masks[iw.point][i] != 0 {
+		text += "   (in the sampling mask)"
+	} else {
+		text += "   (outside the sampling mask)"
+	}
+	iw.pixelInfo.SetText(text)
 }
 
 // levelSlider returns a slider, with its value shown beside it, that sets *level.
@@ -115,15 +138,14 @@ func (iw *imageWindow) setRedLevel(level float64) {
 func (iw *imageWindow) render() {
 	n := iw.curve.RoiSize
 	if iw.point < 0 || n == 0 {
-		iw.raw.Image = image.NewNRGBA(image.Rect(0, 0, 1, 1))
-		iw.masked.Image = image.NewNRGBA(image.Rect(0, 0, 1, 1))
+		iw.raw.setImage(image.NewNRGBA(image.Rect(0, 0, 1, 1)), 0)
+		iw.masked.setImage(image.NewNRGBA(image.Rect(0, 0, 1, 1)), 0)
 	} else {
 		img, mask := iw.curve.Images[iw.point], iw.curve.Masks[iw.point]
-		iw.raw.Image = scaledImage(img, nil, n, iw.black, iw.white, iw.red)
-		iw.masked.Image = scaledImage(img, mask, n, iw.black, iw.white, iw.red)
+		iw.raw.setImage(scaledImage(img, nil, n, iw.black, iw.white, iw.red), n)
+		iw.masked.setImage(scaledImage(img, mask, n, iw.black, iw.white, iw.red), n)
 	}
-	iw.raw.Refresh()
-	iw.masked.Refresh()
+	iw.showPixelInfo() // the pixel under the pointer may now be in another frame
 }
 
 // scaledImage turns an n×n row-major aperture image into gray levels: values at

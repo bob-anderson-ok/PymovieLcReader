@@ -99,7 +99,7 @@ func TestImageWindowsFollowSelection(t *testing.T) {
 	}
 
 	v.checks[2].SetChecked(true)
-	v.closeImageWindows()
+	v.closeWindows()
 	for i, iw := range v.imageWins {
 		if iw != nil {
 			t.Errorf("window %d still open", i)

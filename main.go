@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	appVersion = "1.1"
+	appVersion = "1.2"
 	appTitle   = "PyMovie LC Reader " + appVersion
 	// appID identifies the app to Fyne, which keys the preferences store on it.
 	// Changing it later loses any saved preferences.
@@ -23,20 +23,34 @@ const (
 
 	// Preference keys.
 	prefLastFolder = "lastFolder" // folder of the last file picked in the Open dialog
+	prefLastFile   = "lastFile"   // full path of the last file opened, reopened at startup
 	prefDotSize    = "dotSize"    // dot diameter on the light curve plot
 	prefMainWindow = "mainWindow" // prefix of the main window's size and position keys
 )
 
-func main() {
-	// A path on the command line opens that file; otherwise LC-test.pymovie if it is here.
-	path := ""
-	if len(os.Args) > 1 {
-		path = os.Args[1]
-	} else if _, err := os.Stat("LC-test.pymovie"); err == nil {
-		path = "LC-test.pymovie"
+// startupFile returns the file to open at startup, or "" for none: a path on
+// the command line (args[1]); else lastFile, the last file opened, if it still
+// exists; else LC-test.pymovie if it is in the working folder.
+func startupFile(args []string, lastFile string) string {
+	exists := func(p string) bool {
+		info, err := os.Stat(p)
+		return err == nil && !info.IsDir()
 	}
+	switch {
+	case len(args) > 1:
+		return args[1]
+	case lastFile != "" && exists(lastFile):
+		return lastFile
+	case exists("LC-test.pymovie"):
+		return "LC-test.pymovie"
+	}
+	return ""
+}
 
+func main() {
 	a := app.NewWithID(appID)
+	path := startupFile(os.Args, a.Preferences().String(prefLastFile))
+
 	w := a.NewWindow(appTitle)
 	w.SetMaster() // closing the main window quits, closing the image windows too
 	body := container.NewStack()
@@ -44,10 +58,15 @@ func main() {
 
 	show := func(path string) {
 		if current != nil {
-			current.closeImageWindows()
+			current.closeWindows()
 		}
 		var content fyne.CanvasObject
 		content, current = newViewer(path, a, w)
+		if current != nil { // read: reopen it next time
+			if abs, err := filepath.Abs(path); err == nil {
+				a.Preferences().SetString(prefLastFile, abs)
+			}
+		}
 		body.Objects = []fyne.CanvasObject{content}
 		body.Refresh()
 		w.SetTitle(appTitle + " - " + filepath.Base(path))
@@ -98,7 +117,7 @@ func main() {
 	w.SetCloseIntercept(func() {
 		saveWindowGeometry(prefs, w, prefMainWindow)
 		if current != nil {
-			current.closeImageWindows() // saves their geometry
+			current.closeWindows() // saves their geometry
 		}
 		w.Close()
 	})
@@ -106,7 +125,7 @@ func main() {
 	a.Lifecycle().SetOnStarted(func() {
 		restoreWindowPosition(prefs, w, prefMainWindow)
 		if current != nil {
-			current.restoreImageWindowPositions()
+			current.restoreWindowPositions()
 		}
 	})
 	w.ShowAndRun()
