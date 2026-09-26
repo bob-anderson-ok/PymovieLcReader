@@ -104,3 +104,7 @@ run from the PyMovie repository, since it uses PyMovie's own writer.
 Settings such as the dot size, the last file and window positions are kept in
 Fyne's preferences for the app ID `com.pymovie.lcreader` (on Windows, in
 `%APPDATA%\fyne\com.pymovie.lcreader\preferences.json`).
+
+## License
+
+MIT: see [LICENSE](LICENSE). You may use, copy, modify and distribute the code, provided the copyright and permission notice are kept.
