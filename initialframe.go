@@ -57,16 +57,35 @@ func newFrameWindow(app fyne.App, h pymoviefile.Header, title string) fyne.Windo
 	w := app.NewWindow(title)
 	var frame fyne.CanvasObject = centeredLabel("No frame was recorded in this file.")
 	if h.FrameWidth > 0 {
-		img := canvas.NewImageFromImage(frameImage(h))
-		// Smooth scaling (the default): the box outlines are 1 pixel wide, and
-		// scaling down by dropping pixels could lose a box's edge.
-		img.FillMode = canvas.ImageFillContain
-		img.SetMinSize(fyne.NewSize(200, 150))
-		frame = img
+		view := newFrameView(frameImage(h), h.Apertures)
+		info := widget.NewLabel(frameInfoPrompt)
+		view.onHover = func(row, col int, ok bool) { info.SetText(framePixelText(h, row, col, ok)) }
+		frame = container.NewBorder(nil, info, nil, nil, view)
+		w.Canvas().SetOnTypedKey(func(e *fyne.KeyEvent) {
+			if e.Name == fyne.KeyEscape {
+				view.fitToView()
+			}
+		})
 	}
 	top := widget.NewLabel("Initial frame: " + frameSizeText(h))
 	w.SetContent(container.NewBorder(top, apertureTable(h.Apertures), nil, nil, frame))
 	return w
+}
+
+const frameInfoPrompt = "Scroll to zoom, drag to move, double-click, right-click or Esc to fit.  Point at a pixel to see its value."
+
+// framePixelText describes the initial frame pixel at (row, col); ok is false
+// when the pointer is over no pixel. The frame is gray, apart from the aperture
+// box outlines.
+func framePixelText(h pymoviefile.Header, row, col int, ok bool) string {
+	if !ok {
+		return frameInfoPrompt
+	}
+	r, g, b := h.FramePixel(row, col)
+	if r == g && g == b {
+		return fmt.Sprintf("Pixel x %d, y %d:  %d", col, row, r)
+	}
+	return fmt.Sprintf("Pixel x %d, y %d:  R %d, G %d, B %d", col, row, r, g, b)
 }
 
 // frameImage returns the header's initial frame as an image.

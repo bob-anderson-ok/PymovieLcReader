@@ -14,8 +14,10 @@ opens these files and shows:
   sampling mask at the cursor frame, black/white level sliders, pixels at or
   above the saturation level in red, and the value of the pixel under the
   mouse pointer;
-- the initial frame with the colored aperture boxes and a table of the
-  apertures' positions.
+- the initial frame with the colored aperture boxes, which the scroll wheel
+  zooms and a drag moves, showing the value of the pixel under the mouse
+  pointer and the name of the aperture it is in; and a table of the apertures'
+  positions.
 
 The file format is described in [aperture-record-format.md](aperture-record-format.md).
 
@@ -89,7 +91,7 @@ initial frame) and the files in `go-reader/testdata/`.
 | `curves.go` | Light curves built from the records; limits, frames, timestamps |
 | `plot.go`, `plotwidget.go` | Drawing the plot (with [gonum/plot](https://github.com/gonum/plot)), the cursor and clicks |
 | `imagewindow.go`, `pixelview.go` | The aperture image windows and the pixel under the pointer |
-| `initialframe.go` | The initial frame window |
+| `initialframe.go`, `frameview.go` | The initial frame window, and the zoomable view of the frame |
 | `winpos*.go` | Remembering window sizes and (on Windows) positions |
 | `go-reader/` | Package `pymoviefile`, which reads `.pymovie` files |
 | `aperture-record-format.md` | The file format |
